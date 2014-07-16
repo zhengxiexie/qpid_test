@@ -1,0 +1,114 @@
+#include <qpid/messaging/Connection.h>
+#include <qpid/messaging/Message.h>
+#include <qpid/messaging/Receiver.h>
+#include <qpid/messaging/Sender.h>
+#include <qpid/messaging/Session.h>
+
+#include <stdlib.h>
+#include <time.h>
+#include <stdint.h>
+
+#include <iostream>
+#include <pthread.h>
+
+// using namespace qpid::messaging;
+using namespace std;
+
+typedef qpid::messaging::Connection QPID_Connection;
+typedef qpid::messaging::Session QPID_Session;
+
+#define THREAD_NUM 20
+
+pthread_t thread[THREAD_NUM];
+
+int main(int argc, char * argv[])
+{
+    int num_of_message = (argc > 1)? atoi(argv[1]): 200 * 1000;
+    std::string broker_addr = (argc > 2)? argv[1]: std::string("localhost:5672");
+    static const std::string topic = "amq.topic";
+
+    QPID_Connection conn(broker_addr);
+
+    try {
+
+        conn.open();
+        QPID_Session session = conn.createSession();
+        qpid::messaging::Receiver recv = session.createReceiver(topic);
+        qpid::messaging::Sender sender = session.createSender(topic);
+
+        qpid::messaging::Message msg;
+
+#define timediff(ta, tb) ((uint64_t)((tb - ta) / (CLOCKS_PER_SEC )))
+        clock_t send_begin = 0, send_end = 0;
+        send_begin = clock();
+        time_t time_begin = time(0);
+
+        for (int i = 0; i < num_of_message; i++)
+        {
+            char buffer[64];
+            sprintf(buffer, "%032d", i);
+            msg.setContent(buffer);
+            msg.setContentType("text/plain");
+            sender.send(msg);
+        }
+
+        send_end = clock();
+        time_t time_end = time(0);
+        time_t diff_time = difftime(time_end, time_begin);
+        session.sync();
+        printf("Sending %d msgs, %lus\n", num_of_message, timediff(send_begin, send_end));
+        printf("Use %d seconds\n", diff_time);
+
+        clock_t recv_begin = 0, recv_end = 0;
+        int num_to_read = num_of_message;
+        recv_begin = clock();
+        while (num_of_message-- >= 0) {
+            qpid::messaging::Message msg = recv.fetch(qpid::messaging::Duration::SECOND * 100);
+            session.acknowledge();
+        }
+        session.sync();
+        recv_end = clock();
+        printf("recv %d msgs, %lums\n", num_of_message, timediff(recv_begin, recv_end));
+
+        conn.close();
+    } catch (const std::exception& ignored) {
+
+    }
+
+    return 0;
+
+}
+
+void send_msg(void)
+{
+    for( int i = 0; i < num_of_message; i++)
+    {
+        char buffer[64];
+        sprintf(buffer, "%032d", i);
+        msg.setContent(buffer);
+        msg.setContentType("text/plain");
+        sender.send(msg);
+    }
+}
+
+void thread_create(void)
+{
+    int temp;
+    memset(&thread, 0, sizeof(thread));
+    for(int i = 0; i < THREAD_NUM; i++)
+    {
+        if((temp = pthread_create(&thread[0], NULL, send_msg, NULL)) != 0)
+            printf("thread %d create fail", i);
+    }
+}
+
+void thread_wait(void)
+{
+    for(int i = 0; i < THREAD_NUM; i++)
+    {
+        if(thread[i] != 0)
+        {
+            pthread_join(thread[i],NULL);
+        }
+    }
+}
